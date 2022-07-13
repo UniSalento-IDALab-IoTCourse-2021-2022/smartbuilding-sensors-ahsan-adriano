@@ -1,7 +1,50 @@
 const http = require('http')
 var mqtt=require('mqtt');
+//======================Added for IoT Hub=======================//
+
+var Client = require('azure-iot-device').Client;
+var Protocol = require('azure-iot-device-mqtt').Mqtt;
+const Message = require('azure-iot-device').Message;
+const deviceConnectionString = 'HostName=DemoSmartHome.azure-devices.net;DeviceId=DHT11sensor;SharedAccessKey=698ln+5NtWam7JcdAe95qsr9JlVzDN4fqzUOJEglSjY='
+let deviceClient = Client.fromConnectionString(deviceConnectionString, Protocol);
 
 
+// Helper function to print results in the console
+
+function printResultFor(op) {
+    return function printResult(err, res) {
+        if (err) console.log(op + ' error: ' + err.toString());
+        if (res) console.log(op + ' status: ' + res.constructor.name);
+    };
+}
+
+function disconnectHandler () {
+    clearInterval(sendInterval);
+    sendInterval = null;
+    deviceClient.open().catch((err) => {
+        console.error(err.message);
+    });
+}
+
+function messageHandler (msg) {
+    console.log('Id: ' + msg.messageId + ' Body: ' + msg.data);
+    deviceClient.complete(msg, printResultFor('completed'));
+}
+function errorHandler (err) {
+    console.error(err.message);
+}
+
+
+//deviceClient.on('connect', connectHandler);
+deviceClient.on('error', errorHandler);
+deviceClient.on('disconnect', disconnectHandler);
+deviceClient.on('message', messageHandler);
+deviceClient.open()
+    .catch(err => {
+        console.error('Could not connect: ' + err.message);
+    });
+
+//========================================================
 function pad2(n) { return n < 10 ? '0' + n : n }
 
 function getRndInteger(min, max) {
@@ -18,30 +61,14 @@ function getRndInteger(min, max) {
 // }
 // initialize the request
 
-var HostName="DemoSmartHome.azure-devices.net";
+/*var HostName="DemoSmartHome.azure-devices.net";
 var DeviceId="DHT11sensor";
 var sharedacces="SharedAccessSignature sr=DemoSmartHome.azure-devices.net%2Fdevices%2FDHT11sensor&sig=%2Fy7wjPzn1Wc6v7aBAyQ8k1q4x%2F%2FVzTe2UwwZi%2BE%2BQaU%3D&se=1659699285";
 var broker="mqtts://DemoSmartHome.azure-devices.net:8883/";
 var username="DemoSmartHome.azure-devices.net/DHT11sensor/?api-version=2021-04-12";
-
+*/
 var client= mqtt.connect("mqtt://mqtt.eclipseprojects.io",{clientId:"mqttjs01"});
-//var client = mqtt.connect("mqtt://localhost:1883");
-var azclient = mqtt.connect(broker,{clientId:"DHT11sensor",protocolId: 'MQTT',
-    keepalive: 10,
-    clean: false,
-    protocolVersion: 4,
-    reconnectPeriod: 1000,
-    connectTimeout: 30 * 1000,
-    rejectUnauthorized: false,
-    username:username,
-    password:sharedacces});
-
-azclient.on("connect",function(){
-    console.log("connected to azure");
-});
-azclient.on("error",function(error){
-    console.log("Can't connect to azure"+error);
-});
+//var client = mqtt.connect("mqtt://20.216.178.106:1883");
 client.on("connect",function(){
     console.log("connected to broker");
 });
@@ -54,78 +81,43 @@ var date = new Date();
 // Automatically update sensor value every 2 seconds
 //we use a nested function (function inside another function)
 
-// =========== this below code is for MySql approach===============//
-var mysql = require('mysql');
-const fs = require("fs");
-var con = mysql.createConnection({
-    host: "mysql-idalab.mysql.database.azure.com",
-    user: "idalabsqluser",
-    password: "QmluZ28uMzIx",
-    port: 3306,
-    database : "grafana",
-    ssl: {ca: fs.readFileSync("../DigiCertGlobalRootCA.crt.pem")}
-})
-
-con.connect(function(err) {
-    if (err) throw err;
-    console.log("Connected!");
-    con.query("CREATE DATABASE IF NOT EXISTS grafana", function (err, result) {
-        if (err) throw err;
-        console.log("Database created or already exists");
-    });
-    var sql = "CREATE TABLE IF NOT EXISTS sensordth11 (timestamp  TIMESTAMP, sensor VARCHAR(255), temperature DECIMAL (3,1))";
-    con.query(sql, function (err, result) {
-        if (err) throw err;
-        console.log("Table created");
-
-    });
-});
-
-// =========== End of code for MySql approach===============//
 
 setInterval(function() {
     //var readout = sensorLib.read();
     var timestamp =  date.getFullYear().toString()+"-"+ pad2(date.getMonth() + 1)+"-" + pad2( date.getDate())+" " + pad2( date.getHours() )+":" + pad2( date.getMinutes() )+":" + pad2( date.getSeconds());
     console.log('timestamp: ',timestamp);
-    tmp=28+ 4 * (getRndInteger(10, 80) / 100) - 4 * (getRndInteger(10, 80) / 100);
+    var tmp=28+ 4 * (getRndInteger(10, 80) / 100) - 4 * (getRndInteger(10, 80) / 100);
     console.log('Temperature:', tmp.toFixed(1) + 'C');
     //console.log('Temperature:', readout.temperature.toFixed(1) + 'C');
     //console.log('Humidity: ', readout.humidity.toFixed(1) + '%');
 
     const data = JSON.stringify({
-        "sensor": "ID1",
+        "sensor": "temperature sensor",
         "timestamp": timestamp,
         "temperature":tmp.toFixed(1) //readout.temperature.toFixed(1)
     })
 
+    //======================Added for IoT Hub=======================//
+    var messageBytes = Buffer.from(data, "utf8");
+    var message = new Message(messageBytes);
+    // Encode message body using UTF-8
 
-// ============this below code is for mqtt dashboard ==========//
-    var data_grf = JSON.stringify({
-        "temperature":tmp.toFixed(1) //readout.temperature.toFixed(1)
-    })
-    const regex2 = /"(-?[0-9]+\.{0,1}[0-9]*)"/g
-    data_grf = data_grf.replace(regex2, '$1')
-    client.publish("unisalento/smarthome/raspberry1/grafana/sensor/temperature", data_grf);
 
-// ==================================================================//
-// =========== this below code is for MySql approach===============//
-
-    var myDate =  timestamp;
-    console.log(myDate);
-
-    var sql = "INSERT INTO sensordth11 (timestamp,sensor,temperature ) VALUES (?,?,?)";
-        con.query(sql, [myDate, "Sensor-1" ,tmp], function (err, result) {
-            if (err) throw err;
-            console.log("1 record inserted");
-        });
-
+    // Set message body type and content encoding
+    message.contentEncoding = "utf-8";
+    message.contentType = "application/json";
+    message.properties.add('temperatureAlertAC', (tmp > 22) ? 'true' : 'false');
+    message.properties.add('temperatureAlertHA', (tmp < 22) ? 'true' : 'false');
+    deviceClient.sendEvent(message, (err, res) => {
+        if (err) console.log('error: ' + err.toString());
+        if (res) console.log('status: ' + res.constructor.name);
+    });
 //======================================================================//
 
 
     date.setMinutes(date.getMinutes() + minutes);
     client.publish("unisalento/smarthome/raspberry1/sensor/temperature", data);
 
-    azclient.publish("devices/DHT11sensor/messages/events/", data);
-        //"unisalento/smarthome/raspberry1/actuator/led"
+
 }, 2000);
 

@@ -2,6 +2,60 @@ const http = require('http')
 var mqtt=require('mqtt');
 
 
+
+
+//======================Added for IoT Hub=======================//
+
+var Client = require('azure-iot-device').Client;
+var Protocol = require('azure-iot-device-mqtt').Mqtt;
+const Message = require('azure-iot-device').Message;
+const deviceConnectionString = 'HostName=DemoSmartHome.azure-devices.net;DeviceId=Battery;SharedAccessKey=/GhG6w1F4A+lG0mMAXEFLATsMDb3TawwOJ90izyf2bs='
+let deviceClient = Client.fromConnectionString(deviceConnectionString, Protocol);
+
+
+// Helper function to print results in the console
+
+function printResultFor(op) {
+    return function printResult(err, res) {
+        if (err) console.log(op + ' error: ' + err.toString());
+        if (res) console.log(op + ' status: ' + res.constructor.name);
+    };
+}
+
+function disconnectHandler () {
+    clearInterval(sendInterval);
+    sendInterval = null;
+    deviceClient.open().catch((err) => {
+        console.error(err.message);
+    });
+}
+
+function messageHandler (msg) {
+    console.log('Id: ' + msg.messageId + ' Body: ' + msg.data);
+    deviceClient.complete(msg, printResultFor('completed'));
+}
+function errorHandler (err) {
+    console.error(err.message);
+}
+
+
+//deviceClient.on('connect', connectHandler);
+deviceClient.on('error', errorHandler);
+deviceClient.on('disconnect', disconnectHandler);
+deviceClient.on('message', messageHandler);
+deviceClient.open()
+    .catch(err => {
+        console.error('Could not connect: ' + err.message);
+    });
+
+//========================================================
+
+
+
+
+
+
+
 function getRndInteger(min, max) {
     return Math.floor(Math.random() * (max - min + 1) ) + min;
 }
@@ -30,34 +84,14 @@ function Battery(Capacity,initialPowerpercent,MaxPower){
         this.Charge = (this.Power / this.Capacity) * 100;
     }
 }
-// initialize the request
-var HostName="DemoSmartHome.azure-devices.net";
-var DeviceId="Battery";
-var broker="mqtts://DemoSmartHome.azure-devices.net:8883/";
-var sharedacces="SharedAccessSignature sr=DemoSmartHome.azure-devices.net%2Fdevices%2FBattery&sig=4K%2FrpW068MIvaT9ovccnx0Nh7aOGonNVm2ZwZo3efxg%3D&se=1659682224";
-var username="DemoSmartHome.azure-devices.net/Battery/?api-version=2021-04-12";
 
 
 var client = mqtt.connect("mqtt://mqtt.eclipseprojects.io",{clientId:"mqttjs01"});
-//var client = mqtt.connect("mqtt://localhost:1883");
-
-var azclient = mqtt.connect(broker,{clientId:"Battery",protocolId: 'MQTT',
-    keepalive: 10,
-    clean: false,
-    protocolVersion: 4,
-    reconnectPeriod: 1000,
-    connectTimeout: 30 * 1000,
-    rejectUnauthorized: false,
-    username:username,
-    password:sharedacces});
+//var client = mqtt.connect("mqtt://20.216.178.106:1883");
 
 
-azclient.on("connect",function(){
-    console.log("connected to azure");
-});
-azclient.on("error",function(error){
-    console.log("Can't connect to azure"+error);
-});
+
+
 client.on("connect",function(){
     console.log("connected to broker");
 });
@@ -68,40 +102,6 @@ var readout = new Battery(4000.0,100,);
 var minutes=60;
 var date = new Date();
 
-// =========== this below code is for MySql approach===============//
-var mysql = require('mysql');
-const fs = require('fs');
-
-
-var con = mysql.createConnection({
-    host: "mysql-idalab.mysql.database.azure.com",
-    user: "idalabsqluser",
-    password: "QmluZ28uMzIx",
-    port: 3306,
-    database : "grafana",
-    ssl: {ca: fs.readFileSync("../DigiCertGlobalRootCA.crt.pem")}
-})
-
-
-con.connect(function(err) {
-    if (err) {
-        console.log("!!! Cannot connect !!! Error:");
-        throw err;
-    }
-    console.log("Connected!");
-    con.query("CREATE DATABASE IF NOT EXISTS grafana", function (err, result) {
-        if (err) throw err;
-        console.log("Database created or already exists");
-    });
-    var sql = "CREATE TABLE IF NOT EXISTS battery (timestamp  TIMESTAMP, sensor VARCHAR(255), BatteryPower DECIMAL (5,1), BatteryCharge DECIMAL (3,1))";
-    con.query(sql, function (err, result) {
-        if (err) throw err;
-        console.log("Table created");
-
-    });
-});
-
-// =========== End of code for MySql approach===============//
 
 
 
@@ -123,81 +123,30 @@ setInterval(function() {
         "BatteryCharge":Charge.toFixed(1)
 
     })
+    //======================Added for IoT Hub=======================//
+    var messageBytes = Buffer.from(data, "utf8");
+    var message = new Message(messageBytes);
+    // Encode message body using UTF-8
+    // Set message body type and content encoding
+    message.contentEncoding = "utf-8";
+    message.contentType = "application/json";
+
+    deviceClient.sendEvent(message, (err, res) => {
+        if (err) console.log('error: ' + err.toString());
+        if (res) console.log('status: ' + res.constructor.name);
+    });
+//======================================================================//
     client.publish("unisalento/smarthome/raspberry1/SensorBattery", data);
-    azclient.publish("devices/Battery/messages/events/", data);
+
 
 
     // =========== this below code is for MySql approach===============//
 
 
-    var myDate =  timestamp;
-    console.log(myDate)
-    var pwr = power.toFixed(1);
-    var chg = Charge.toFixed(1)
-    console.log("power is: ",pwr)
-    console.log("Charge is: ",chg)
 
-
-
-    var sql = "INSERT INTO battery (timestamp,sensor,BatteryPower,BatteryCharge  ) VALUES (?,?,?,?)";
-    con.query(sql, [myDate, "Battery" ,pwr,chg], function (err, result) {
-        if (err) throw err;
-        console.log("1 record inserted");
-    });
 
 //======================================================================//
 
-
-
-
-    // ============this below code is for mqtt dashboard ==========//
-    var data_grf_pwr = JSON.stringify({
-        "Battery Power":power.toFixed(1) //readout.temperature.toFixed(1)
-
-    })
-    const regex1 = /"(-?[0-9]+\.{0,1}[0-9]*)"/g
-    data_grf_pwr = data_grf_pwr.replace(regex1, '$1')
-    console.log(data_grf_pwr)
-    client.publish("unisalento/smarthome/raspberry1/grafana/sensor/battery/power", data_grf_pwr);
-
-    var data_grf_efc = JSON.stringify({
-        "Battery Charge":Charge.toFixed(1) //readout.temperature.toFixed(1)
-
-    })
-    const regex2 = /"(-?[0-9]+\.{0,1}[0-9]*)"/g
-    data_grf_efc = data_grf_efc.replace(regex2, '$1')
-    console.log(data_grf_efc)
-    client.publish("unisalento/smarthome/raspberry1/grafana/sensor/battery/efc", data_grf_efc);
 // ==================================================================//
     date.setMinutes(date.getMinutes() + minutes);
 }, 2000);
-/*
-    const options = {
-
-        hostname: '192.168.1.53',
-        port: 3000,
-        path: '/Battery',
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Content-Length': data.length
-        }
-    }
-
-    const req = http.request(options, res => {
-        console.log(`statusCode: ${res.statusCode}`);
-
-        //define the callback function that will print the result of the request in case of success
-        res.on('data', d => {
-            process.stdout.write(d);
-        })
-
-        //define the callback function that will print the result of the request in case of error
-        req.on('error', error => {
-            console.error(error);
-        })
-    })
-    //send the request
-    req.write(data);
-    req.end();
-}, 6000);*/
